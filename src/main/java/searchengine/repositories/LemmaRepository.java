@@ -1,0 +1,23 @@
+package searchengine.repositories;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+import searchengine.Model.LemmaData;
+import searchengine.Model.SiteData;
+
+import java.util.List;
+
+@Repository
+public interface LemmaRepository extends JpaRepository<LemmaData, Integer> {
+    LemmaData findFirstByLemmaAndSite(String lemma, SiteData siteData);
+    List<LemmaData> findAllByLemma(String lemma);
+    List<LemmaData> findAllBySite(SiteData siteData);
+    int countBySite(SiteData siteData);
+
+    @Query(value = "SELECT l.* FROM lemma l\n" +
+            "JOIN lemma2page lp ON l.id = lp.lemma_id\n" +
+            "JOIN page p ON p.id = lp.page_id \n" +
+            "WHERE p.id = :pageId", nativeQuery = true)
+    List<LemmaData> findAllByPage(int pageId);
+}
