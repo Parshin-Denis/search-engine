@@ -5,7 +5,9 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import searchengine.LemmaFinder;
 import searchengine.Model.*;
+import searchengine.SiteResearcher;
 import searchengine.config.Account;
 import searchengine.config.Site;
 import searchengine.config.SitesList;
@@ -61,14 +63,28 @@ public class IndexServiceImpl implements IndexService {
                 siteData = new SiteData(SiteStatus.INDEXING, LocalDateTime.now(),
                         null, site.getUrl(), site.getName());
                 siteRepository.save(siteData);
+                sitesIndexing.add(siteData);
 
+                List<PageData> pageDataList =
+                        pool.invoke(new SiteResearcher(siteData.getUrl(), siteData, this, new HashSet<>()));
                 if (siteData.getStatus() == SiteStatus.INDEXING) {
-                    sitesIndexing.add(siteData);
-                    pool.invoke(new SiteResearcher(siteData.getUrl(), siteData, this));
-                    sitesIndexing.remove(siteData);
-                    if (siteData.getStatus() == SiteStatus.INDEXING) {
-                        siteData.setStatus(SiteStatus.INDEXED);
+                    siteData.setStatusTime(LocalDateTime.now());
+                    siteRepository.save(siteData);
+                    pageRepository.saveAll(pageDataList);
+                }
+                for (PageData pageData : pageDataList) {
+                    if (siteData.getStatus() == SiteStatus.FAILED) {
+                        break;
                     }
+                    if (pageData.getCode() < 400) {
+                        insertLemmaAndIndexData(pageData, siteData);
+                    }
+                    siteData.setStatusTime(LocalDateTime.now());
+                    siteRepository.save(siteData);
+                }
+                sitesIndexing.remove(siteData);
+                if (siteData.getStatus() == SiteStatus.INDEXING) {
+                    siteData.setStatus(SiteStatus.INDEXED);
                     siteRepository.save(siteData);
                 }
             }).start();
@@ -140,16 +156,6 @@ public class IndexServiceImpl implements IndexService {
         return "OK";
     }
 
-    public synchronized boolean insertPageData(PageData pageData, SiteData siteData) {
-        if (pageRepository.existsByPathAndSite(pageData.getPath(), siteData)) {
-            return false;
-        }
-        siteData.setStatusTime(LocalDateTime.now());
-        pageRepository.save(pageData);
-        siteRepository.save(siteData);
-        return true;
-    }
-
     public void updatePageData(Document doc, SiteData siteData) {
         new Thread(() -> {
             PageData pageData = pageRepository
@@ -160,8 +166,9 @@ public class IndexServiceImpl implements IndexService {
             siteData.setStatus(SiteStatus.INDEXING);
             pageData = new PageData(siteData, getRelativeUrl(doc.location()),
                     doc.connection().response().statusCode(), doc.html());
-            insertPageData(pageData, siteData);
+            pageRepository.save(pageData);
             insertLemmaAndIndexData(pageData, siteData);
+            siteData.setStatusTime(LocalDateTime.now());
             siteData.setStatus(SiteStatus.INDEXED);
             siteRepository.save(siteData);
             pagesIndexing.remove(doc.location());
@@ -173,27 +180,27 @@ public class IndexServiceImpl implements IndexService {
         HashMap<String, Integer> lemmasMap = LemmaFinder.getLemmaMap(pageData.getContent());
         List<LemmaData> lemmasToUpdate = new ArrayList<>();
         List<IndexData> indexesToInsert = new ArrayList<>();
-        synchronized (siteData) {
-            List<LemmaData> lemmaDataList = lemmaRepository.findAllBySite(siteData);
-            for (String lemma : lemmasMap.keySet()) {
-                LemmaData lemmaData = null;
-                for (LemmaData l : lemmaDataList) {
-                    if (l.getLemma().equals(lemma)) {
-                        lemmaData = l;
-                        break;
-                    }
-                }
 
-                if (lemmaData == null) {
-                    lemmaData = new LemmaData(siteData, lemma, 1);
-                } else {
-                    lemmaData.setFrequency(lemmaData.getFrequency() + 1);
+        List<LemmaData> lemmaDataList = lemmaRepository.findAllBySite(siteData);
+        for (String lemma : lemmasMap.keySet()) {
+            LemmaData lemmaData = null;
+            for (LemmaData l : lemmaDataList) {
+                if (l.getLemma().equals(lemma)) {
+                    lemmaData = l;
+                    break;
                 }
-                lemmasToUpdate.add(lemmaData);
-                indexesToInsert.add(new IndexData(pageData, lemmaData, lemmasMap.get(lemma)));
             }
-            lemmaRepository.saveAll(lemmasToUpdate);
+
+            if (lemmaData == null) {
+                lemmaData = new LemmaData(siteData, lemma, 1);
+            } else {
+                lemmaData.setFrequency(lemmaData.getFrequency() + 1);
+            }
+            lemmasToUpdate.add(lemmaData);
+            indexesToInsert.add(new IndexData(pageData, lemmaData, lemmasMap.get(lemma)));
         }
+
+        lemmaRepository.saveAll(lemmasToUpdate);
         indexRepository.saveAll(indexesToInsert);
     }
 
