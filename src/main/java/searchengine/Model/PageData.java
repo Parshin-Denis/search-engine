@@ -13,15 +13,16 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 public class PageData {
+    public static final int MAX_LENGTH_PATH = 300;
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
 
     @ManyToOne
     @JoinColumn(name = "site_id", nullable = false)
     private SiteData site;
 
-    @Column(columnDefinition = "VARCHAR(255)", nullable = false)
+    @Column(columnDefinition = "VARCHAR(" + MAX_LENGTH_PATH + ")", nullable = false)
     private String path;
 
     @Column(nullable = false)

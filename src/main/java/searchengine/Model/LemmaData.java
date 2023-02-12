@@ -12,7 +12,7 @@ import java.util.List;
 @NoArgsConstructor
 public class LemmaData {
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
 
     @ManyToOne
@@ -25,7 +25,7 @@ public class LemmaData {
     @Column(nullable = false)
     private int frequency;
 
-    @OneToMany(mappedBy = "lemma", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "lemma", cascade = CascadeType.REMOVE)
     private List<IndexData> indexList;
 
     public LemmaData(SiteData site, String lemma, int frequency) {

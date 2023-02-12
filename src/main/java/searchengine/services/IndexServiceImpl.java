@@ -1,5 +1,6 @@
 package searchengine.services;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -28,9 +29,9 @@ import java.util.regex.Pattern;
 public class IndexServiceImpl implements IndexService {
     private final SitesList sites;
     private final Account account;
-    private Set<SiteData> sitesIndexing = new HashSet<>();
+    @Getter
+    private Map<SiteData, Set<String>> sitesIndexing = new HashMap<>();
     private Set<String> pagesIndexing = new HashSet<>();
-    private Set<String> pagesIndexed = new HashSet<>();
     @Autowired
     private PageRepository pageRepository;
     @Autowired
@@ -63,25 +64,13 @@ public class IndexServiceImpl implements IndexService {
                 siteData = new SiteData(SiteStatus.INDEXING, LocalDateTime.now(),
                         null, site.getUrl(), site.getName());
                 siteRepository.save(siteData);
-                sitesIndexing.add(siteData);
+                sitesIndexing.put(siteData, new HashSet<>());
 
-                List<PageData> pageDataList =
-                        pool.invoke(new SiteResearcher(siteData.getUrl(), siteData, this, new HashSet<>()));
-                if (siteData.getStatus() == SiteStatus.INDEXING) {
-                    siteData.setStatusTime(LocalDateTime.now());
-                    siteRepository.save(siteData);
-                    pageRepository.saveAll(pageDataList);
-                }
-                for (PageData pageData : pageDataList) {
-                    if (siteData.getStatus() == SiteStatus.FAILED) {
-                        break;
-                    }
-                    if (pageData.getCode() < 400) {
-                        insertLemmaAndIndexData(pageData, siteData);
-                    }
-                    siteData.setStatusTime(LocalDateTime.now());
-                    siteRepository.save(siteData);
-                }
+                List<PageData> pageDataList = pool
+                        .invoke(new SiteResearcher(siteData.getUrl(), siteData, this));
+
+                insertAllData(pageDataList, siteData);
+
                 sitesIndexing.remove(siteData);
                 if (siteData.getStatus() == SiteStatus.INDEXING) {
                     siteData.setStatus(SiteStatus.INDEXED);
@@ -98,7 +87,7 @@ public class IndexServiceImpl implements IndexService {
             return false;
         }
 
-        for (SiteData siteData : sitesIndexing) {
+        for (SiteData siteData : sitesIndexing.keySet()) {
             siteData.setStatus(SiteStatus.FAILED);
             siteData.setLastError("Индексация остановлена пользователем");
             siteRepository.save(siteData);
@@ -113,7 +102,7 @@ public class IndexServiceImpl implements IndexService {
             return "Введён некорректный адрес";
         }
 
-        if (sitesIndexing.stream().anyMatch(siteData -> siteData.getUrl().equals(siteUrl))){
+        if (sitesIndexing.keySet().stream().anyMatch(siteData -> siteData.getUrl().equals(siteUrl))){
             return "Индексация невозможна: Данный сайт еще индексируется";
         }
 
@@ -136,11 +125,6 @@ public class IndexServiceImpl implements IndexService {
             }
         }
 
-        if (pagesIndexed.contains(doc.location())) {
-            pagesIndexed.remove(doc.location());
-            return "OK";
-        }
-
         if (pagesIndexing.contains(doc.location())) {
             return "Страница индексируется";
         }
@@ -151,57 +135,71 @@ public class IndexServiceImpl implements IndexService {
 
         pagesIndexing.add(doc.location());
 
-        updatePageData(doc, siteData);
+        PageData pageData = pageRepository.findFirstByPathAndSite(getRelativeUrl(doc.location()), siteData);
+        if (pageData != null) {
+            deletePageData(pageData);
+        }
+
+        siteData.setStatus(SiteStatus.INDEXING);
+        pageData = new PageData(siteData, getRelativeUrl(doc.location()),
+                doc.connection().response().statusCode(), doc.html());
+
+        List<PageData> pageDataList = new ArrayList<>();
+        pageDataList.add(pageData);
+        insertAllData(pageDataList, siteData);
+
+        siteData.setStatus(SiteStatus.INDEXED);
+        siteData.setStatusTime(LocalDateTime.now());
+        siteRepository.save(siteData);
+        pagesIndexing.remove(doc.location());
 
         return "OK";
     }
 
-    public void updatePageData(Document doc, SiteData siteData) {
-        new Thread(() -> {
-            PageData pageData = pageRepository
-                    .findFirstByPathAndSite(getRelativeUrl(doc.location()), siteData);
-            if (pageData != null) {
-                deletePageData(pageData);
-            }
-            siteData.setStatus(SiteStatus.INDEXING);
-            pageData = new PageData(siteData, getRelativeUrl(doc.location()),
-                    doc.connection().response().statusCode(), doc.html());
-            pageRepository.save(pageData);
-            insertLemmaAndIndexData(pageData, siteData);
-            siteData.setStatusTime(LocalDateTime.now());
-            siteData.setStatus(SiteStatus.INDEXED);
-            siteRepository.save(siteData);
-            pagesIndexing.remove(doc.location());
-            pagesIndexed.add(doc.location());
-        }).start();
-    }
-
-    public void insertLemmaAndIndexData(PageData pageData, SiteData siteData) {
-        HashMap<String, Integer> lemmasMap = LemmaFinder.getLemmaMap(pageData.getContent());
-        List<LemmaData> lemmasToUpdate = new ArrayList<>();
-        List<IndexData> indexesToInsert = new ArrayList<>();
-
-        List<LemmaData> lemmaDataList = lemmaRepository.findAllBySite(siteData);
-        for (String lemma : lemmasMap.keySet()) {
-            LemmaData lemmaData = null;
-            for (LemmaData l : lemmaDataList) {
-                if (l.getLemma().equals(lemma)) {
-                    lemmaData = l;
-                    break;
-                }
-            }
-
-            if (lemmaData == null) {
-                lemmaData = new LemmaData(siteData, lemma, 1);
-            } else {
-                lemmaData.setFrequency(lemmaData.getFrequency() + 1);
-            }
-            lemmasToUpdate.add(lemmaData);
-            indexesToInsert.add(new IndexData(pageData, lemmaData, lemmasMap.get(lemma)));
+    public void insertAllData(List<PageData> pageDataList, SiteData siteData) {
+        if (siteData.getStatus() == SiteStatus.FAILED) {
+            return;
         }
+        List<LemmaData> lemmasToInsert = new ArrayList<>();
+        List<IndexData> indexesToInsert = new ArrayList<>();
+        List<LemmaData> lemmaDataList = lemmaRepository.findAllBySite(siteData);
 
-        lemmaRepository.saveAll(lemmasToUpdate);
+        for (PageData pageData : pageDataList) {
+            HashMap<String, Integer> lemmasMap = LemmaFinder.getLemmaMap(pageData.getContent());
+
+            for (String lemma : lemmasMap.keySet()) {
+                boolean isLemmaInListToInsert = true;
+                LemmaData lemmaData = lemmasToInsert
+                        .stream()
+                        .filter(l -> l.getLemma().equals(lemma))
+                        .findFirst()
+                        .orElse(null);
+
+                if (lemmaData == null) {
+                    lemmaData = lemmaDataList
+                            .stream()
+                            .filter(l -> l.getLemma().equals(lemma))
+                            .findFirst()
+                            .orElse(null);
+                    isLemmaInListToInsert = false;
+                }
+
+                if (lemmaData == null) {
+                    lemmaData = new LemmaData(siteData, lemma, 1);
+                } else {
+                    lemmaData.setFrequency(lemmaData.getFrequency() + 1);
+                }
+                if (!isLemmaInListToInsert) {
+                    lemmasToInsert.add(lemmaData);
+                }
+                indexesToInsert.add(new IndexData(pageData, lemmaData, lemmasMap.get(lemma)));
+            }
+        }
+        pageRepository.saveAll(pageDataList);
+        lemmaRepository.saveAll(lemmasToInsert);
         indexRepository.saveAll(indexesToInsert);
+        siteData.setStatusTime(LocalDateTime.now());
+        siteRepository.save(siteData);
     }
 
     public void deletePageData(PageData pageData) {
