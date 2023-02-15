@@ -30,9 +30,10 @@ public class IndexServiceImpl implements IndexService {
     private final SitesList sites;
     private final Account account;
     @Getter
-    private Map<SiteData, Set<String>> sitesIndexing = new HashMap<>();
+    private Map<SiteData, List<PageData>> sitesIndexing = new HashMap<>();
     private Set<String> pagesIndexing = new HashSet<>();
     @Autowired
+    @Getter
     private PageRepository pageRepository;
     @Autowired
     private SiteRepository siteRepository;
@@ -64,10 +65,12 @@ public class IndexServiceImpl implements IndexService {
                 siteData = new SiteData(SiteStatus.INDEXING, LocalDateTime.now(),
                         null, site.getUrl(), site.getName());
                 siteRepository.save(siteData);
-                sitesIndexing.put(siteData, new HashSet<>());
 
-                List<PageData> pageDataList = pool
-                        .invoke(new SiteResearcher(siteData.getUrl(), siteData, this));
+                List<PageData> pageDataList = new ArrayList<>();
+                pageDataList.add(new PageData(siteData, getRelativeUrl(siteData.getUrl()), 0, ""));
+                sitesIndexing.put(siteData, pageDataList);
+
+                pool.invoke(new SiteResearcher(pageDataList.get(0), siteData, this));
 
                 insertAllData(pageDataList, siteData);
 
@@ -165,6 +168,9 @@ public class IndexServiceImpl implements IndexService {
         List<LemmaData> lemmaDataList = lemmaRepository.findAllBySite(siteData);
 
         for (PageData pageData : pageDataList) {
+            if (pageData.getCode() >= 400) {
+                continue;
+            }
             HashMap<String, Integer> lemmasMap = LemmaFinder.getLemmaMap(pageData.getContent());
 
             for (String lemma : lemmasMap.keySet()) {

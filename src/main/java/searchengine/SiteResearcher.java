@@ -12,76 +12,62 @@ import searchengine.services.IndexServiceImpl;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.RecursiveTask;
+import java.util.stream.Collectors;
 
-public class SiteResearcher extends RecursiveTask<List<PageData>> {
-    private String url;
+public class SiteResearcher extends RecursiveTask<PageData> {
+    private PageData pageData;
     private SiteData siteData;
     private IndexServiceImpl indexService;
-    private Set<String> foundUrls;
+    private List<PageData> pageDataStore;
 
-    public SiteResearcher(String url, SiteData siteData, IndexServiceImpl indexService) {
-        this.url = url;
+    public SiteResearcher(PageData pageData, SiteData siteData, IndexServiceImpl indexService) {
+        this.pageData = pageData;
         this.indexService = indexService;
         this.siteData = siteData;
-        this.foundUrls = indexService.getSitesIndexing().get(siteData);
-        if (foundUrls.isEmpty()) {
-            foundUrls.add(indexService.getRelativeUrl(url));
-        }
+        this.pageDataStore = indexService.getSitesIndexing().get(siteData);
     }
 
     @Override
-    protected List<PageData> compute() {
-        List<PageData> pageDataList = new ArrayList<>();
-
+    protected PageData compute() {
         if (siteData.getStatus() == SiteStatus.FAILED) {
-            return pageDataList;
+            return pageData;
         }
 
         Document doc;
         try {
-            doc = Jsoup.connect(url)
+            doc = Jsoup.connect(siteData.getUrl().concat(pageData.getPath()))
                     .userAgent(indexService.getAccount().getUserAgent())
                     .referrer(indexService.getAccount().getReferrer())
                     .get();
         } catch (IOException e) {
-            return pageDataList;
+            pageData.setCode(404);
+            return pageData;
         }
 
-        String relativeDocUrl = indexService.getRelativeUrl(doc.location());
-        String relativeUrlUrl = indexService.getRelativeUrl(url);
-        if (!relativeDocUrl.equals(relativeUrlUrl)) {
-            synchronized (foundUrls) {
-                if (foundUrls.contains(relativeDocUrl)) {
-                    return pageDataList;
-                }
-                foundUrls.add(relativeDocUrl);
-            }
-        }
-
-        if (relativeDocUrl.length() > PageData.MAX_LENGTH_PATH) {
-            return pageDataList;
-        }
-
-        pageDataList.add(new PageData(siteData, relativeDocUrl, doc.connection().response().statusCode(), doc.html()));
+        pageData.setCode(doc.connection().response().statusCode());
+        pageData.setContent(doc.html());
 
         List<SiteResearcher> siteResearcherList = getUrlChildResearcherList(doc);
 
         for (SiteResearcher siteResearcher : siteResearcherList) {
-            pageDataList.addAll(siteResearcher.join());
+            siteResearcher.join();
         }
 
-        if (pageDataList.size() > 300) {
-            synchronized (siteData) {
-                indexService.insertAllData(pageDataList, siteData);
+        synchronized (pageDataStore) {
+            List<PageData> pagesToInsert = pageDataStore
+                    .stream()
+                    .filter(p -> p.getCode() > 0)
+                    .collect(Collectors.toList());
+            if (pagesToInsert.size() > 500) {
+                indexService.insertAllData(pagesToInsert, siteData);
+                pageDataStore.removeAll(pagesToInsert);
             }
-            pageDataList.clear();
         }
-        return pageDataList;
+        return pageData;
     }
 
-    private List<SiteResearcher> getUrlChildResearcherList (Document doc){
+    private List<SiteResearcher> getUrlChildResearcherList(Document doc) {
         List<SiteResearcher> siteResearcherList = new ArrayList<>();
         Elements elements = doc.select("a[href~=^[^#?]+$]");
         for (Element element : elements) {
@@ -93,14 +79,21 @@ public class SiteResearcher extends RecursiveTask<List<PageData>> {
             }
 
             String relativeUrlChild = indexService.getRelativeUrl(urlChild);
-            synchronized (foundUrls) {
-                if (foundUrls.contains(relativeUrlChild)) {
-                    continue;
-                }
-                foundUrls.add(relativeUrlChild);
+            if (relativeUrlChild.length() > PageData.MAX_LENGTH_PATH) {
+                continue;
             }
 
-            SiteResearcher siteResearcher = new SiteResearcher(urlChild, siteData, indexService);
+            PageData pageDataChild;
+            synchronized (pageDataStore) {
+                if (indexService.getPageRepository().existsByPathAndSite(relativeUrlChild, siteData)
+                        || pageDataStore.stream().anyMatch(p -> p.getPath().equals(relativeUrlChild))) {
+                    continue;
+                }
+                pageDataChild = new PageData(siteData, relativeUrlChild, 0, "");
+                pageDataStore.add(pageDataChild);
+            }
+
+            SiteResearcher siteResearcher = new SiteResearcher(pageDataChild, siteData, indexService);
             siteResearcher.fork();
             siteResearcherList.add(siteResearcher);
         }
