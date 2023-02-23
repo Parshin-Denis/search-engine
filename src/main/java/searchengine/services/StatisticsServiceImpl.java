@@ -3,23 +3,18 @@ package searchengine.services;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import searchengine.Model.SiteData;
-import searchengine.Model.SiteStatus;
-import searchengine.config.Site;
+import searchengine.model.SiteData;
+import searchengine.model.SiteStatus;
 import searchengine.config.SitesList;
 import searchengine.dto.statistics.DetailedStatisticsItem;
 import searchengine.dto.statistics.StatisticsData;
 import searchengine.dto.statistics.StatisticsResponse;
 import searchengine.dto.statistics.TotalStatistics;
-import searchengine.repositories.IndexRepository;
 import searchengine.repositories.LemmaRepository;
 import searchengine.repositories.PageRepository;
 import searchengine.repositories.SiteRepository;
 
-import java.lang.reflect.Field;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
-import java.time.temporal.ChronoField;
 import java.util.*;
 
 @Service

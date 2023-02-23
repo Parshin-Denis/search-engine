@@ -4,9 +4,9 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import searchengine.Model.PageData;
-import searchengine.Model.SiteData;
-import searchengine.Model.SiteStatus;
+import searchengine.model.PageData;
+import searchengine.model.SiteData;
+import searchengine.model.SiteStatus;
 import searchengine.services.IndexServiceImpl;
 
 import java.io.IOException;

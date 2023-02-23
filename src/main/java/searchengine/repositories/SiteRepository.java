@@ -2,8 +2,8 @@ package searchengine.repositories;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
-import searchengine.Model.SiteData;
-import searchengine.Model.SiteStatus;
+import searchengine.model.SiteData;
+import searchengine.model.SiteStatus;
 
 @Repository
 public interface SiteRepository extends JpaRepository<SiteData, Integer> {

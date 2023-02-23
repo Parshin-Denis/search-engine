@@ -1,9 +1,9 @@
 package searchengine.repositories;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import searchengine.Model.IndexData;
-import searchengine.Model.LemmaData;
-import searchengine.Model.PageData;
+import searchengine.model.IndexData;
+import searchengine.model.LemmaData;
+import searchengine.model.PageData;
 
 public interface IndexRepository extends JpaRepository<IndexData, Integer> {
 

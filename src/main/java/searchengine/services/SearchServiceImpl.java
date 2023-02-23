@@ -5,11 +5,10 @@ import org.jsoup.Jsoup;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.LemmaFinder;
-import searchengine.Model.LemmaData;
-import searchengine.Model.PageData;
-import searchengine.Model.SiteData;
+import searchengine.model.LemmaData;
+import searchengine.model.PageData;
+import searchengine.model.SiteData;
 import searchengine.Snippet;
-import searchengine.config.SitesList;
 import searchengine.dto.search.PageInfoItem;
 import searchengine.dto.search.SearchResponse;
 import searchengine.repositories.IndexRepository;
@@ -31,8 +30,8 @@ public class SearchServiceImpl implements SearchService {
     @Autowired
     private IndexRepository indexRepository;
     private String prevQuery;
-    private int prevSize;
-    private List<PageInfoItem> prevPageInfo;
+    private int pagesCount;
+    private List<PageInfoItem> pageInfoItems = new ArrayList<>();
     private final int snippetLength = 250;
 
     @Override
@@ -52,35 +51,13 @@ public class SearchServiceImpl implements SearchService {
 
             List<PageData> pageDataList = getPagesFromData(lemmaDataList, siteData);
 
-            List<PageInfoItem> pageInfoItemList = new ArrayList<>();
-            for (PageData pageData : pageDataList) {
-                float absRelevance = 0;
-                for (LemmaData lemmaData : lemmaDataList) {
-                    absRelevance += siteUrl != null
-                            ? indexRepository.findFirstByLemmaAndPage(lemmaData, pageData).getRank()
-                            : indexRepository.findFirstByLemma_LemmaAndPage(lemmaData.getLemma(), pageData).getRank();
-                }
-                PageInfoItem pageInfoItem = new PageInfoItem();
-                pageInfoItem.setSite(pageData.getSite().getUrl());
-                pageInfoItem.setSiteName(pageData.getSite().getName());
-                pageInfoItem.setUri(pageData.getPath());
-                pageInfoItem.setTitle(Jsoup.parse(pageData.getContent()).title());
-                pageInfoItem.setSnippet(getSnippet(pageData, queryLemmas));
-                pageInfoItem.setRelevance(absRelevance);
-                pageInfoItemList.add(pageInfoItem);
-            }
-            if (pageInfoItemList.size() > 0) {
-                pageInfoItemList.sort(Comparator.comparing(PageInfoItem::getRelevance).reversed());
-                float maxAbsRelevance = pageInfoItemList.get(0).getRelevance();
-                pageInfoItemList.forEach(p -> p.setRelevance(p.getRelevance() / maxAbsRelevance));
-            }
+            fillPagesInfo(pageDataList, lemmaDataList, siteData, queryLemmas);
 
-            prevSize = pageDataList.size();
+            pagesCount = pageDataList.size();
             prevQuery = currentQuery;
-            prevPageInfo = pageInfoItemList;
         }
-        response.setCount(prevSize);
-        response.setData(prevPageInfo.subList(offset, Math.min(prevSize, offset + limit)));
+        response.setCount(pagesCount);
+        response.setData(pageInfoItems.subList(offset, Math.min(pagesCount, offset + limit)));
         response.setResult(true);
         return response;
     }
@@ -127,6 +104,32 @@ public class SearchServiceImpl implements SearchService {
             }
         }
         return pageDataList;
+    }
+
+    public void fillPagesInfo(List<PageData> pageDataList, List<LemmaData> lemmaDataList,
+                              SiteData siteData, Set<String> queryLemmas){
+        pageInfoItems.clear();
+        for (PageData pageData : pageDataList) {
+            float absRelevance = 0;
+            for (LemmaData lemmaData : lemmaDataList) {
+                absRelevance += siteData != null
+                        ? indexRepository.findFirstByLemmaAndPage(lemmaData, pageData).getRank()
+                        : indexRepository.findFirstByLemma_LemmaAndPage(lemmaData.getLemma(), pageData).getRank();
+            }
+            PageInfoItem pageInfoItem = new PageInfoItem();
+            pageInfoItem.setSite(pageData.getSite().getUrl());
+            pageInfoItem.setSiteName(pageData.getSite().getName());
+            pageInfoItem.setUri(pageData.getPath());
+            pageInfoItem.setTitle(Jsoup.parse(pageData.getContent()).title());
+            pageInfoItem.setSnippet(getSnippet(pageData, queryLemmas));
+            pageInfoItem.setRelevance(absRelevance);
+            pageInfoItems.add(pageInfoItem);
+        }
+        if (pageInfoItems.size() > 0) {
+            pageInfoItems.sort(Comparator.comparing(PageInfoItem::getRelevance).reversed());
+            float maxAbsRelevance = pageInfoItems.get(0).getRelevance();
+            pageInfoItems.forEach(p -> p.setRelevance(p.getRelevance() / maxAbsRelevance));
+        }
     }
 
     public String getSnippet(PageData pageData, Set<String> queryLemmas) {

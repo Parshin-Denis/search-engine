@@ -7,7 +7,7 @@ import org.jsoup.nodes.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import searchengine.LemmaFinder;
-import searchengine.Model.*;
+import searchengine.model.*;
 import searchengine.SiteResearcher;
 import searchengine.config.Account;
 import searchengine.config.Site;
@@ -138,6 +138,14 @@ public class IndexServiceImpl implements IndexService {
 
         pagesIndexing.add(doc.location());
 
+        updatePageData(siteData, doc);
+
+        pagesIndexing.remove(doc.location());
+
+        return "OK";
+    }
+
+    public void updatePageData(SiteData siteData, Document doc){
         PageData pageData = pageRepository.findFirstByPathAndSite(getRelativeUrl(doc.location()), siteData);
         if (pageData != null) {
             deletePageData(pageData);
@@ -154,9 +162,25 @@ public class IndexServiceImpl implements IndexService {
         siteData.setStatus(SiteStatus.INDEXED);
         siteData.setStatusTime(LocalDateTime.now());
         siteRepository.save(siteData);
-        pagesIndexing.remove(doc.location());
+    }
 
-        return "OK";
+    public void deletePageData(PageData pageData) {
+        List<LemmaData> lemmaDataList = lemmaRepository.findAllByPage(pageData.getId());
+        List<LemmaData> lemmaDataListToUpdate = new ArrayList<>();
+        List<LemmaData> lemmaDataListToDelete = new ArrayList<>();
+
+        lemmaDataList.forEach(lemmaData -> {
+            if (lemmaData.getFrequency() > 1) {
+                lemmaData.setFrequency(lemmaData.getFrequency() - 1);
+                lemmaDataListToUpdate.add(lemmaData);
+            } else {
+                lemmaDataListToDelete.add(lemmaData);
+            }
+        });
+
+        pageRepository.delete(pageData);
+        lemmaRepository.deleteAll(lemmaDataListToDelete);
+        lemmaRepository.saveAll(lemmaDataListToUpdate);
     }
 
     public void insertAllData(List<PageData> pageDataList, SiteData siteData) {
@@ -206,25 +230,6 @@ public class IndexServiceImpl implements IndexService {
         indexRepository.saveAll(indexesToInsert);
         siteData.setStatusTime(LocalDateTime.now());
         siteRepository.save(siteData);
-    }
-
-    public void deletePageData(PageData pageData) {
-        List<LemmaData> lemmaDataList = lemmaRepository.findAllByPage(pageData.getId());
-        List<LemmaData> lemmaDataListToUpdate = new ArrayList<>();
-        List<LemmaData> lemmaDataListToDelete = new ArrayList<>();
-
-        lemmaDataList.forEach(lemmaData -> {
-            if (lemmaData.getFrequency() > 1) {
-                lemmaData.setFrequency(lemmaData.getFrequency() - 1);
-                lemmaDataListToUpdate.add(lemmaData);
-            } else {
-                lemmaDataListToDelete.add(lemmaData);
-            }
-        });
-
-        pageRepository.delete(pageData);
-        lemmaRepository.deleteAll(lemmaDataListToDelete);
-        lemmaRepository.saveAll(lemmaDataListToUpdate);
     }
 
     public Account getAccount() {
