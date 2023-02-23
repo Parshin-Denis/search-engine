@@ -1,6 +1,5 @@
 package searchengine;
 
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -36,10 +35,7 @@ public class SiteResearcher extends RecursiveTask<PageData> {
 
         Document doc;
         try {
-            doc = Jsoup.connect(siteData.getUrl().concat(pageData.getPath()))
-                    .userAgent(indexService.getAccount().getUserAgent())
-                    .referrer(indexService.getAccount().getReferrer())
-                    .get();
+            doc = indexService.getDocument(siteData.getUrl().concat(pageData.getPath()));
         } catch (IOException e) {
             pageData.setCode(404);
             return pageData;

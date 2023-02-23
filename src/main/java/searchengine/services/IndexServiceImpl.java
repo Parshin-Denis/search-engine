@@ -72,13 +72,12 @@ public class IndexServiceImpl implements IndexService {
 
                 pool.invoke(new SiteResearcher(pageDataList.get(0), siteData, this));
 
-                insertAllData(pageDataList, siteData);
-
-                sitesIndexing.remove(siteData);
                 if (siteData.getStatus() == SiteStatus.INDEXING) {
+                    insertAllData(pageDataList, siteData);
                     siteData.setStatus(SiteStatus.INDEXED);
                     siteRepository.save(siteData);
                 }
+                sitesIndexing.remove(siteData);
             }).start();
         }
         return "OK";
@@ -104,21 +103,15 @@ public class IndexServiceImpl implements IndexService {
         if (siteUrl == null) {
             return "Введён некорректный адрес";
         }
-
         if (sitesIndexing.keySet().stream().anyMatch(siteData -> siteData.getUrl().equals(siteUrl))){
             return "Индексация невозможна: Данный сайт еще индексируется";
         }
-
-        Document doc = null;
-        try {
-            doc = Jsoup.connect(url)
-                    .userAgent(account.getUserAgent())
-                    .referrer(account.getReferrer())
-                    .get();
-        } catch (IOException e) {
-            return "Страница не доступна";
+        if (pagesIndexing.contains(url)) {
+            return "Страница индексируется";
         }
-
+        if (pagesIndexing.stream().anyMatch(p -> getSiteUrl(p).equals(siteUrl))) {
+            return "Индексация невозможна. Индексируется страница с этого же сайта.";
+        }
         SiteData siteData = siteRepository.findFirstByUrl(siteUrl);
         if (siteData == null) {
             siteData = findInConfigFile(siteUrl);
@@ -128,20 +121,16 @@ public class IndexServiceImpl implements IndexService {
             }
         }
 
-        if (pagesIndexing.contains(doc.location())) {
-            return "Страница индексируется";
+        Document doc;
+        try {
+            doc = getDocument(url);
+        } catch (IOException e) {
+            return "Страница не доступна";
         }
 
-        if (pagesIndexing.stream().anyMatch(p -> getSiteUrl(p).equals(siteUrl))) {
-            return "Индексация невозможна. Индексируется страница с этого же сайта.";
-        }
-
-        pagesIndexing.add(doc.location());
-
+        pagesIndexing.add(url);
         updatePageData(siteData, doc);
-
-        pagesIndexing.remove(doc.location());
-
+        pagesIndexing.remove(url);
         return "OK";
     }
 
@@ -184,33 +173,19 @@ public class IndexServiceImpl implements IndexService {
     }
 
     public void insertAllData(List<PageData> pageDataList, SiteData siteData) {
-        if (siteData.getStatus() == SiteStatus.FAILED) {
-            return;
-        }
         List<LemmaData> lemmasToInsert = new ArrayList<>();
         List<IndexData> indexesToInsert = new ArrayList<>();
         List<LemmaData> lemmaDataList = lemmaRepository.findAllBySite(siteData);
-
         for (PageData pageData : pageDataList) {
             if (pageData.getCode() >= 400) {
                 continue;
             }
             HashMap<String, Integer> lemmasMap = LemmaFinder.getLemmaMap(pageData.getContent());
-
             for (String lemma : lemmasMap.keySet()) {
                 boolean isLemmaInListToInsert = true;
-                LemmaData lemmaData = lemmasToInsert
-                        .stream()
-                        .filter(l -> l.getLemma().equals(lemma))
-                        .findFirst()
-                        .orElse(null);
-
+                LemmaData lemmaData = findInList(lemmasToInsert, lemma);
                 if (lemmaData == null) {
-                    lemmaData = lemmaDataList
-                            .stream()
-                            .filter(l -> l.getLemma().equals(lemma))
-                            .findFirst()
-                            .orElse(null);
+                    lemmaData = findInList(lemmaDataList, lemma);
                     isLemmaInListToInsert = false;
                 }
 
@@ -219,6 +194,7 @@ public class IndexServiceImpl implements IndexService {
                 } else {
                     lemmaData.setFrequency(lemmaData.getFrequency() + 1);
                 }
+
                 if (!isLemmaInListToInsert) {
                     lemmasToInsert.add(lemmaData);
                 }
@@ -230,10 +206,6 @@ public class IndexServiceImpl implements IndexService {
         indexRepository.saveAll(indexesToInsert);
         siteData.setStatusTime(LocalDateTime.now());
         siteRepository.save(siteData);
-    }
-
-    public Account getAccount() {
-        return account;
     }
 
     public String getRelativeUrl(String url) {
@@ -269,5 +241,20 @@ public class IndexServiceImpl implements IndexService {
             }
         }
         return null;
+    }
+
+    public LemmaData findInList(List<LemmaData> lemmaDataList, String lemma) {
+        return lemmaDataList
+                .stream()
+                .filter(l -> l.getLemma().equals(lemma))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public Document getDocument(String url) throws IOException {
+        return Jsoup.connect(url)
+                .userAgent(account.getUserAgent())
+                .referrer(account.getReferrer())
+                .get();
     }
 }
