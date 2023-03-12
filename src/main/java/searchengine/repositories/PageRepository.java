@@ -12,6 +12,7 @@ import java.util.List;
 public interface PageRepository extends JpaRepository<PageData, Integer> {
     boolean existsByPathAndSite(String path, SiteData siteData);
     PageData findFirstByPathAndSite(String path, SiteData siteData);
+    List<PageData> findFirst500BySite(SiteData siteData);
     int countBySite(SiteData siteData);
     @Query(value = "SELECT p.* FROM page p\n" +
             "JOIN lemma2page lp ON p.id = lp.page_id\n" +

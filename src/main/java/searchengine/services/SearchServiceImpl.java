@@ -11,6 +11,7 @@ import searchengine.model.SiteData;
 import searchengine.Snippet;
 import searchengine.dto.search.PageInfoItem;
 import searchengine.dto.search.SearchResponse;
+import searchengine.model.SiteStatus;
 import searchengine.repositories.IndexRepository;
 import searchengine.repositories.LemmaRepository;
 import searchengine.repositories.PageRepository;
@@ -40,7 +41,8 @@ public class SearchServiceImpl implements SearchService {
         String currentQuery = siteUrl + " " + query;
         if (!currentQuery.equals(prevQuery)) {
             SiteData siteData = siteRepository.findFirstByUrl(siteUrl);
-            if (siteUrl != null && siteData == null) {
+            if (siteUrl != null && (siteData == null || siteData.getStatus() == SiteStatus.INDEXING) ||
+                siteUrl == null && siteRepository.existsByStatus(SiteStatus.INDEXING)) {
                 response.setResult(false);
                 return response;
             }
@@ -86,6 +88,9 @@ public class SearchServiceImpl implements SearchService {
     }
 
     public List<PageData> getPagesFromData(List<LemmaData> lemmaDataList, SiteData siteData) {
+        if(lemmaDataList.size() == 0){
+            return new ArrayList<>();
+        }
         List<PageData> pageDataList = siteData != null
                 ? pageRepository.findAllByLemmaAndSite(lemmaDataList.get(0).getLemma(), siteData.getId())
                 : pageRepository.findAllByLemma(lemmaDataList.get(0).getLemma());
@@ -121,7 +126,7 @@ public class SearchServiceImpl implements SearchService {
             pageInfoItem.setSiteName(pageData.getSite().getName());
             pageInfoItem.setUri(pageData.getPath());
             pageInfoItem.setTitle(Jsoup.parse(pageData.getContent()).title());
-            pageInfoItem.setSnippet(getSnippet(pageData, queryLemmas));
+            pageInfoItem.setSnippet(getSnippetText(pageData, queryLemmas));
             pageInfoItem.setRelevance(absRelevance);
             pageInfoItems.add(pageInfoItem);
         }
@@ -132,29 +137,20 @@ public class SearchServiceImpl implements SearchService {
         }
     }
 
-    public String getSnippet(PageData pageData, Set<String> queryLemmas) {
+    public String getSnippetText(PageData pageData, Set<String> queryLemmas) {
 
         String text = pageData.getContent();
 
-        TreeMap<Integer, String> queryWordsIndexes = LemmaFinder.getWordIndexes(text, queryLemmas);
+        List<Snippet> snippetList = LemmaFinder.getSnippetList(text, queryLemmas);
 
-        List<Snippet> snippets = new ArrayList<>();
-        Snippet snippet = null;
-        for (Integer index : queryWordsIndexes.keySet()) {
-            int startIndexFrag = text.substring(0, index).lastIndexOf(">") + 1;
-            if (snippet == null || startIndexFrag != snippet.getBeginIndex()) {
-                snippet = new Snippet(startIndexFrag);
-                snippets.add(snippet);
-            }
-            snippet.getQueryWordsIndexes().put(index, queryWordsIndexes.get(index));
-        }
-
-        snippets.sort(Comparator.comparingInt(f -> f.getQueryWordsIndexes().size()));
+        snippetList.sort(Comparator.comparingInt(f -> f.getQueryWordsIndexes().size()));
         String snippetText = "";
-        int snippetIndex = snippets.size() - 1;
+        int snippetIndex = snippetList.size() - 1;
         while (snippetIndex >= 0 && snippetText.length() < snippetLength) {
-            snippetText += snippets.get(snippetIndex)
-                    .getSnippetText(text, snippetLength - snippetText.length()) + " ";
+            snippetText = snippetText
+                    .concat(snippetList.get(snippetIndex)
+                            .getFormattedText(snippetLength - snippetText.length()))
+                    .concat("|");
             snippetIndex--;
         }
         return snippetText;

@@ -20,11 +20,11 @@ public class SiteResearcher extends RecursiveTask<PageData> {
     private IndexServiceImpl indexService;
     private List<PageData> pageDataStore;
 
-    public SiteResearcher(PageData pageData, SiteData siteData, IndexServiceImpl indexService) {
+    public SiteResearcher(PageData pageData, List<PageData> pageDataStore, IndexServiceImpl indexService) {
         this.pageData = pageData;
         this.indexService = indexService;
-        this.siteData = siteData;
-        this.pageDataStore = indexService.getSitesIndexing().get(siteData);
+        this.siteData = pageData.getSite();
+        this.pageDataStore = pageDataStore;
     }
 
     @Override
@@ -69,13 +69,8 @@ public class SiteResearcher extends RecursiveTask<PageData> {
         for (Element element : elements) {
             String urlChild = element.attr("abs:href");
 
-            if (urlChild.indexOf(siteData.getUrl()) != 0 &&
-                    urlChild.indexOf(siteData.getUrl().replaceFirst("www.", "")) != 0) {
-                continue;
-            }
-
-            String relativeUrlChild = indexService.getRelativeUrl(urlChild);
-            if (relativeUrlChild.length() > PageData.MAX_LENGTH_PATH) {
+            String relativeUrlChild = indexService.getRelativeUrl(urlChild, siteData.getUrl());
+            if (relativeUrlChild.isBlank() || relativeUrlChild.length() > PageData.MAX_LENGTH_PATH) {
                 continue;
             }
 
@@ -89,7 +84,7 @@ public class SiteResearcher extends RecursiveTask<PageData> {
                 pageDataStore.add(pageDataChild);
             }
 
-            SiteResearcher siteResearcher = new SiteResearcher(pageDataChild, siteData, indexService);
+            SiteResearcher siteResearcher = new SiteResearcher(pageDataChild, pageDataStore, indexService);
             siteResearcher.fork();
             siteResearcherList.add(siteResearcher);
         }

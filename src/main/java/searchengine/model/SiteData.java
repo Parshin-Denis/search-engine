@@ -34,10 +34,10 @@ public class SiteData {
     @Column(columnDefinition = "VARCHAR(255)", nullable = false)
     private String name;
 
-    @OneToMany(mappedBy = "site", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "site", cascade = CascadeType.REMOVE)
     private List<PageData> pageList;
 
-    @OneToMany(mappedBy = "site", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "site", cascade = CascadeType.REMOVE)
     private List<LemmaData> lemmaList;
 
     public SiteData(SiteStatus status, LocalDateTime statusTime, String lastError, String url, String name) {

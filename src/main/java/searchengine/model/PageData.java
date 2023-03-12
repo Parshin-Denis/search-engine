@@ -31,7 +31,7 @@ public class PageData {
     @Column(columnDefinition = "MEDIUMTEXT CHARACTER SET 'utf8mb4'", nullable = false)
     private String content;
 
-    @OneToMany(mappedBy = "page", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "page", cascade = CascadeType.REMOVE)
     private List<IndexData> indexList;
 
     public PageData(SiteData site, String path, int code, String content) {

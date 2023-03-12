@@ -29,9 +29,7 @@ import java.util.regex.Pattern;
 public class IndexServiceImpl implements IndexService {
     private final SitesList sites;
     private final Account account;
-    @Getter
-    private Map<SiteData, List<PageData>> sitesIndexing = new HashMap<>();
-    private Set<String> pagesIndexing = new HashSet<>();
+    private final Map<SiteData, List<PageData>> sitesIndexing = new HashMap<>();
     @Autowired
     @Getter
     private PageRepository pageRepository;
@@ -43,34 +41,27 @@ public class IndexServiceImpl implements IndexService {
     private IndexRepository indexRepository;
 
     @Override
-    public String startIndexing() {
-        if (!sitesIndexing.isEmpty()) {
-            if (siteRepository.existsByStatus(SiteStatus.INDEXING)){
-                return "Индексация уже запущена";
-            }
-            return "Индексация еще выполняется";
-        }
-        if (!pagesIndexing.isEmpty()){
-            return "Запущена индексация страницы";
-        }
-
+    public void startIndexing() {
         ForkJoinPool pool = new ForkJoinPool();
         for (Site site : sites.getSites()) {
             new Thread(() -> {
                 SiteData siteData = siteRepository.findFirstByName(site.getName());
                 if (siteData != null) {
-                    siteRepository.delete(siteData);
+                    sitesIndexing.put(siteData, null);
+                    deleteSiteData(siteData);
+                    siteData.setStatusTime(LocalDateTime.now());
+                    siteData.setUrl(getSiteUrl(site));
+                } else {
+                    siteData = new SiteData(SiteStatus.INDEXING, LocalDateTime.now(),
+                            "", getSiteUrl(site), site.getName());
                 }
-
-                siteData = new SiteData(SiteStatus.INDEXING, LocalDateTime.now(),
-                        null, site.getUrl(), site.getName());
                 siteRepository.save(siteData);
 
                 List<PageData> pageDataList = new ArrayList<>();
-                pageDataList.add(new PageData(siteData, getRelativeUrl(siteData.getUrl()), 0, ""));
+                pageDataList.add(new PageData(siteData, "/", 0, ""));
                 sitesIndexing.put(siteData, pageDataList);
 
-                pool.invoke(new SiteResearcher(pageDataList.get(0), siteData, this));
+                pool.invoke(new SiteResearcher(pageDataList.get(0), pageDataList, this));
 
                 if (siteData.getStatus() == SiteStatus.INDEXING) {
                     insertAllData(pageDataList, siteData);
@@ -80,45 +71,23 @@ public class IndexServiceImpl implements IndexService {
                 sitesIndexing.remove(siteData);
             }).start();
         }
-        return "OK";
     }
 
     @Override
-    public boolean stopIndexing() {
-        if (sitesIndexing.isEmpty()) {
-            return false;
-        }
-
+    public void stopIndexing() {
         for (SiteData siteData : sitesIndexing.keySet()) {
             siteData.setStatus(SiteStatus.FAILED);
             siteData.setLastError("Индексация остановлена пользователем");
             siteRepository.save(siteData);
         }
-        return true;
     }
 
     @Override
     public String indexPage(String url) {
-        String siteUrl = getSiteUrl(url);
-        if (siteUrl == null) {
-            return "Введён некорректный адрес";
-        }
-        if (sitesIndexing.keySet().stream().anyMatch(siteData -> siteData.getUrl().equals(siteUrl))){
-            return "Индексация невозможна: Данный сайт еще индексируется";
-        }
-        if (pagesIndexing.contains(url)) {
-            return "Страница индексируется";
-        }
-        if (pagesIndexing.stream().anyMatch(p -> getSiteUrl(p).equals(siteUrl))) {
-            return "Индексация невозможна. Индексируется страница с этого же сайта.";
-        }
-        SiteData siteData = siteRepository.findFirstByUrl(siteUrl);
+        SiteData siteData = findSiteData(url);
         if (siteData == null) {
-            siteData = findInConfigFile(siteUrl);
-            if (siteData == null) {
-                return "Данная страница находится за пределами сайтов, \n" +
-                        "указанных в конфигурационном файле\n";
-            }
+            return "Данная страница находится за пределами сайтов, \n" +
+                    "указанных в конфигурационном файле\n";
         }
 
         Document doc;
@@ -128,29 +97,37 @@ public class IndexServiceImpl implements IndexService {
             return "Страница не доступна";
         }
 
-        pagesIndexing.add(url);
-        updatePageData(siteData, doc);
-        pagesIndexing.remove(url);
-        return "OK";
-    }
-
-    public void updatePageData(SiteData siteData, Document doc){
-        PageData pageData = pageRepository.findFirstByPathAndSite(getRelativeUrl(doc.location()), siteData);
+        PageData pageData = pageRepository
+                .findFirstByPathAndSite(getRelativeUrl(doc.location(), siteData.getUrl()), siteData);
         if (pageData != null) {
             deletePageData(pageData);
         }
 
-        siteData.setStatus(SiteStatus.INDEXING);
-        pageData = new PageData(siteData, getRelativeUrl(doc.location()),
+        pageData = new PageData(siteData, getRelativeUrl(doc.location(), siteData.getUrl()),
                 doc.connection().response().statusCode(), doc.html());
 
         List<PageData> pageDataList = new ArrayList<>();
         pageDataList.add(pageData);
         insertAllData(pageDataList, siteData);
 
-        siteData.setStatus(SiteStatus.INDEXED);
-        siteData.setStatusTime(LocalDateTime.now());
+        return "OK";
+    }
+
+    @Override
+    public Set<SiteData> getSitesInIndexing() {
+        return sitesIndexing.keySet();
+    }
+
+    public void deleteSiteData(SiteData siteData) {
+        siteData.setStatus(SiteStatus.INDEXING);
         siteRepository.save(siteData);
+        while (pageRepository.countBySite(siteData) != 0 && siteData.getStatus() != SiteStatus.FAILED) {
+            List<PageData> pageDataList = pageRepository.findFirst500BySite(siteData);
+            pageRepository.deleteAll(pageDataList);
+        }
+        if (siteData.getStatus() != SiteStatus.FAILED) {
+            lemmaRepository.deleteAll(lemmaRepository.findAllBySite(siteData));
+        }
     }
 
     public void deletePageData(PageData pageData) {
@@ -183,9 +160,9 @@ public class IndexServiceImpl implements IndexService {
             HashMap<String, Integer> lemmasMap = LemmaFinder.getLemmaMap(pageData.getContent());
             for (String lemma : lemmasMap.keySet()) {
                 boolean isLemmaInListToInsert = true;
-                LemmaData lemmaData = findInList(lemmasToInsert, lemma);
+                LemmaData lemmaData = findLemmaInList(lemmasToInsert, lemma);
                 if (lemmaData == null) {
-                    lemmaData = findInList(lemmaDataList, lemma);
+                    lemmaData = findLemmaInList(lemmaDataList, lemma);
                     isLemmaInListToInsert = false;
                 }
 
@@ -208,42 +185,55 @@ public class IndexServiceImpl implements IndexService {
         siteRepository.save(siteData);
     }
 
-    public String getRelativeUrl(String url) {
-        String[] parts = url.split("/", 4);
-        if (parts.length < 4) {
-            return "/";
+    public String getRelativeUrl(String url, String siteUrl) {
+        String urlWoWWW = url.replaceFirst("//www.", "//");
+        String siteUrlWoWWW = siteUrl.replaceFirst("//www.", "//");
+        if (!urlWoWWW.startsWith(siteUrlWoWWW)) {
+            return "";
         }
-        return "/" + parts[3];
+
+        String relativeUrl = urlWoWWW.substring(siteUrlWoWWW.length());
+        if (!relativeUrl.startsWith("/")) {
+            relativeUrl = "/".concat(relativeUrl);
+        }
+
+        return relativeUrl;
     }
 
-    public String getSiteUrl(String url) {
-        Pattern pattern = Pattern.compile("^https?://[^/]+");
-        Matcher matcher = pattern.matcher(url);
-        String siteUrl = null;
-        if (matcher.find()) {
-            siteUrl = matcher.group();
-            if (!siteUrl.contains("www")) {
-                String[] parts = siteUrl.split("//", 2);
-                siteUrl = parts[0] + "//www." + parts[1];
-            }
+    public String getSiteUrl(Site site) {
+        try {
+            Document doc = getDocument(site.getUrl());
+            return doc.location().endsWith("/")
+                    ? doc.location().substring(0, doc.location().length() - 1)
+                    : doc.location();
+        } catch (IOException e) {
+            return site.getUrl();
         }
-        return siteUrl;
     }
 
-    public SiteData findInConfigFile(String url) {
-        String siteUrlShort = url.split("/")[2].replaceAll("www.", "");
-        for (Site site : sites.getSites()) {
-            if (site.getUrl().split("/")[2].replaceAll("www.", "").equals(siteUrlShort)) {
-                SiteData siteData = new SiteData(SiteStatus.INDEXING, LocalDateTime.now(),
-                        null, site.getUrl(), site.getName());
+    public SiteData findSiteData(String url) {
+        List<SiteData> siteDataList = siteRepository.findAll();
+        SiteData siteData = siteDataList
+                .stream()
+                .filter(s -> !getRelativeUrl(url, s.getUrl()).isBlank())
+                .findFirst()
+                .orElse(null);
+        if (siteData == null) {
+            Site site = sites.getSites()
+                    .stream()
+                    .filter(s -> !getRelativeUrl(url, s.getUrl()).isBlank())
+                    .findFirst()
+                    .orElse(null);
+            if (site != null) {
+                siteData = new SiteData(SiteStatus.INDEXING, LocalDateTime.now(),
+                        "", getSiteUrl(site), site.getName());
                 siteRepository.save(siteData);
-                return siteData;
             }
         }
-        return null;
+        return siteData;
     }
 
-    public LemmaData findInList(List<LemmaData> lemmaDataList, String lemma) {
+    public LemmaData findLemmaInList(List<LemmaData> lemmaDataList, String lemma) {
         return lemmaDataList
                 .stream()
                 .filter(l -> l.getLemma().equals(lemma))

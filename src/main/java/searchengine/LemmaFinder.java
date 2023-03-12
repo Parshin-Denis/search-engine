@@ -17,70 +17,84 @@ public class LemmaFinder {
         }
     }
 
-    public static HashMap<String, Integer> getLemmaMap(String text){
-        HashMap <String, Integer> wordsMap = new HashMap<>();
+    public static HashMap<String, Integer> getLemmaMap(String text) {
+        HashMap<String, Integer> wordsMap = new HashMap<>();
         String textCleaned = removeHTMLTags(text);
         String[] words = splitToRussianWords(textCleaned);
-        for (String word: words) {
 
-            if (!isNormalWord(word)) {
+        for (String word : words) {
+            String lowerWord = word.toLowerCase();
+
+            if (!isNormalWord(lowerWord)) {
                 continue;
             }
 
-            String baseWord = getNormalForm(word);
+            String baseWord = getNormalForm(lowerWord);
+
             if (wordsMap.containsKey(baseWord)) {
                 wordsMap.put(baseWord, wordsMap.get(baseWord) + 1);
-            }
-            else {
+            } else {
                 wordsMap.put(baseWord, 1);
             }
         }
         return wordsMap;
     }
 
-    public static TreeMap<Integer, String> getWordIndexes(String text, Set<String> lemmas){
-        TreeMap<Integer, String> wordIndexes = new TreeMap<>();
+    public static List<Snippet> getSnippetList(String text, Set<String> lemmas) {
         String textCleaned = removeHTMLTags(text);
         String[] words = splitToRussianWords(textCleaned);
-        int wordIndex = 0;
-        for (String word: words) {
 
-            if (!isNormalWord(word)) {
+        List<Snippet> snippetList = new ArrayList<>();
+        Snippet snippet = null;
+        int wordIndex = 0;
+
+        for (String word : words) {
+            String lowerWord = word.toLowerCase();
+
+            if (!isNormalWord(lowerWord)) {
                 continue;
             }
 
-            String baseWord = getNormalForm(word);
-            if (lemmas.contains(baseWord)){
-                wordIndex = text.indexOf(word, wordIndex + 1);
-                wordIndexes.put(wordIndex, word);
+            String baseWord = getNormalForm(lowerWord);
+
+            if (lemmas.contains(baseWord)) {
+                wordIndex = textCleaned.indexOf(word, wordIndex + 1);
+                if (snippet == null || wordIndex > snippet.getEndIndex()) {
+                    snippet = new Snippet();
+                    snippet.setBeginIndex(textCleaned.substring(0, wordIndex).lastIndexOf(">") + 1);
+                    snippet.setEndIndex(textCleaned.indexOf("<", wordIndex));
+                    snippet.setText(textCleaned.substring(snippet.getBeginIndex(), snippet.getEndIndex()));
+                    snippetList.add(snippet);
+                }
+                snippet.getQueryWordsIndexes().put(wordIndex - snippet.getBeginIndex(), word);
             }
         }
-        return wordIndexes;
+        return snippetList;
     }
 
-    public static Set<String> getLemmaSet (String query) {
+    public static Set<String> getLemmaSet(String query) {
         Set<String> lemmaSet = new HashSet<>();
         String[] words = splitToRussianWords(query);
-        for (String word: words) {
 
-            if (!isNormalWord(word)) {
+        for (String word : words) {
+            String lowerWord = word.toLowerCase();
+
+            if (!isNormalWord(lowerWord)) {
                 continue;
             }
 
-            lemmaSet.add(getNormalForm(word));
+            lemmaSet.add(getNormalForm(lowerWord));
         }
         return lemmaSet;
     }
-    private static String removeHTMLTags (String text) {
-        String regexScriptBlock = "<script.*>[^<>]+</script>";
 
-        String regexAllTags = "<[^<>]+>";
+    private static String removeHTMLTags(String text) {
+        String regexScriptBlock = "<script[\\s\\S]*?</script>";
 
-        String regexBeginningLineSpaces = "\\n\\s+";
+        String regexAllTags = "(<[^<>]+>\\s*)+";
 
         return text.replaceAll(regexScriptBlock, "")
-                .replaceAll(regexAllTags, "")
-                .replaceAll(regexBeginningLineSpaces, "\n");
+                .replaceAll(regexAllTags, "<\n>");
     }
 
     public static String[] splitToRussianWords(String text) {
@@ -88,15 +102,15 @@ public class LemmaFinder {
         return text.split(regexNotRussianLetters);
     }
 
-    public static boolean isNormalWord(String word){
+    public static boolean isNormalWord(String word) {
         if (word.isBlank()) {
             return false;
         }
         String[] particleNames = new String[]{"ПРЕДЛ", "СОЮЗ", "ЧАСТ", "МЕЖД"};
-        List<String> wordBaseForms = luceneMorph.getMorphInfo(word.toLowerCase());
+        List<String> wordBaseForms = luceneMorph.getMorphInfo(word);
         return wordBaseForms.stream().anyMatch(s -> {
-            for (String particle: particleNames) {
-                if (s.contains(particle)){
+            for (String particle : particleNames) {
+                if (s.contains(particle)) {
                     return false;
                 }
             }
@@ -104,8 +118,8 @@ public class LemmaFinder {
         });
     }
 
-    public static String getNormalForm(String word){
-        List<String> wordBaseForms = luceneMorph.getNormalForms(word.toLowerCase());
+    public static String getNormalForm(String word) {
+        List<String> wordBaseForms = luceneMorph.getNormalForms(word);
         return wordBaseForms.get(0);
     }
 }
