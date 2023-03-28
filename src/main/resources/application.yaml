@@ -1,0 +1,44 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    username: root
+    password: sqltest
+    url: jdbc:mysql://localhost:3306/search_engine?useSSL=false&requireSSL=false&allowPublicKeyRetrieval=true
+  jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+indexing-settings:
+  sites:
+#    - url: http://www.playback.ru/
+#      name: PlayBack.Ru
+#    - url: https://volochek.life/
+#      name: volochek
+    - url: http://radiomv.ru/
+      name: radiomv
+#    - url: https://ipfran.ru/
+#      name: ipfran
+#    - url: https://dimonvideo.ru/
+#      name: dimonvideo
+    - url: https://nikoartgallery.com/
+      name: nikoartgallery
+    - url: https://et-cetera.ru/mobile/
+      name: et-cetera
+#    - url: https://www.lutherancathedral.ru/
+#      name: lutherancathedral
+#    - url: https://dombulgakova.ru/
+#      name: dombulgakova
+#    - url: https://www.svetlovka.ru/
+#      name: svetlovka
+#    - url: https://www.skillbox.ru
+#      name: Skillbox
+
+account-settings:
+  userAgent: ParSearchBot
+  referrer: http://www.google.com
